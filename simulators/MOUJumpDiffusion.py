@@ -66,8 +66,8 @@ class MOUJumpDiffusion:
 
     # TODO: Better Jumps needed
     def set_jump_params(self):
-        self.sigma_eps = np.std(self.best_model['residuals'], ddof=1)
-        thresh = 3 * self.sigma_eps
+        self.sigma_residuals = np.std(self.best_model['residuals'], ddof=1)
+        thresh = 3 * self.sigma_residuals
         jump_resid = self.best_model['residuals'][np.abs(self.best_model['residuals']) > thresh]
         n = len(self.best_model['residuals'])
 
