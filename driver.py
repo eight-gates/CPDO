@@ -133,10 +133,7 @@ simulator = MultiCDSSimulator(name_to_series_map=historical_data, nu=len(histori
 # paths_array, paths_df = simulator.simulate_paths(n_paths=100)
 paths_array, paths_df = simulator.simulate_paths_multithreaded(n_paths=100)
 
-
 print(f'Shape of Monte Carlo matrix: {paths_array.shape}')
-
-
 # ========== Plot 5: A few scenarios ==========
 cds_names = simulator.names
 scenarios = 5

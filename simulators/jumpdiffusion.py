@@ -8,6 +8,7 @@ from statsmodels.graphics.tsaplots import plot_acf
 from statsmodels.tsa.stattools import adfuller
 from statsforecast import StatsForecast
 from statsforecast.models import AutoRegressive, ARIMA, ARCH, GARCH
+from scipy.stats import zscore
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
@@ -77,12 +78,9 @@ class MOUJumpDiffusion:
         # plt.tight_layout()
         # plt.show()
 
-        residuals = result.get("residuals")
-        residuals = (residuals - residuals.mean()) / residuals.std()
-
         return {'backtesting_scores': {'MAE': mae, 'MSE': mse, 'RMSE': rmse, 'MAPE': mape},
                 'predictions': forecast[model],
-                'residuals': residuals,
+                'residuals': zscore(result.get("residuals")),
                 'coefficients': result.get("coef"),
                 "aic": result.get('aic'),
                 "sigma2": result.get('sigma2'),
