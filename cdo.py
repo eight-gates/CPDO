@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import bootstrap
 
 class CPDO:
     """
@@ -245,6 +247,8 @@ class CPDO:
         self.VaR99 = VaR99
         self.rating = rating
 
+        self.report_cpdo_mc_error()
+
         return {
             "NAV_paths": nav_paths,
             "default_loss_paths": default_loss_paths,
@@ -255,6 +259,49 @@ class CPDO:
             "VaR99": VaR99,
             "rating": rating
         }
+
+    def report_cpdo_mc_error(self):
+        """Compute and display SE and 95% CI for PD, EL, VaR95, & VaR99."""
+        # Prepare data
+        defaults = (self.final_losses > 1e-6).astype(int)
+        metrics_data = {
+            'PD': defaults,
+            'EL': self.final_losses,
+            'VaR95': self.final_losses,
+            'VaR99': self.final_losses
+        }
+        funcs = {
+            'PD': lambda x: np.mean(x),
+            'EL': lambda x: np.mean(x),
+            'VaR95': lambda x: np.percentile(x, 95),
+            'VaR99': lambda x: np.percentile(x, 99)
+        }
+        se = {}
+        ci = {}
+        for name, arr in metrics_data.items():
+            res = bootstrap((arr,), funcs[name],
+                            confidence_level=0.95,
+                            n_resamples=2000,
+                            method='percentile')
+            se[name] = arr.std(ddof=1) / np.sqrt(len(arr))
+            low, high = res.confidence_interval
+            ci[name] = (low, high)
+
+        # Print results
+        print("CPDO Monte Carlo Errors: ")
+        for name in funcs.keys():
+            low, high = ci[name]
+        print(f"  {name:<5s} SE={se[name]:.4f}, 95% CI=({low:.4f}, {high:.4f})")
+
+        # Bar chart of SEs
+        names = list(funcs.keys())
+        ses = [se[n] for n in names]
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.bar(names, ses)
+        ax.set_title('CPDO Monte Carlo Standard Errors')
+        ax.set_ylabel('Standard Error')
+        plt.tight_layout();
+        plt.show()
 
     def _assign_rating(self, PD, EL):
         """

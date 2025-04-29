@@ -8,9 +8,11 @@ b) Value of the "Floater" that defined the spread for each CDS
 from concurrent.futures import ThreadPoolExecutor
 from typing import Tuple
 
+from matplotlib import pyplot as plt
 from simulators.jumpdiffusion import MOUJumpDiffusion
 import numpy as np
 import pandas as pd
+from scipy.stats import bootstrap
 
 class MultiCDSSimulator:
     def __init__(self, name_to_series_map, nu=2):
@@ -37,6 +39,57 @@ class MultiCDSSimulator:
         resid_matrix = np.vstack(resid_data)
         return np.corrcoef(resid_matrix)
 
+    def report_mc_error(self,paths: np.ndarray, cds_names: list[str]):
+        """Pretty‑print MC error table & visualize standard errors."""
+        err = self.compute_mc_error(paths)
+        se = err['se_mean']  # (T,n)
+        avg_se = se.mean(axis=0)  # per CDS
+        ci_low = err['ci_lower']; ci_high = err['ci_upper']
+
+        # Text summary
+        print("Monte‑Carlo sampling error(average SE over horizon):")
+        for nm, s in zip(cds_names, avg_se):
+            print(f"  {nm:<25s}: ±{s:8.3f} bps (1‑σ)")
+
+        # Plot: bar chart of avg SE per CDS
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.bar(cds_names, avg_se)
+        ax.set_ylabel('Average Std‑Error (bps)')
+        ax.set_title('Monte‑Carlo Standard Error by CDS')
+        ax.tick_params(axis='x', rotation=45)
+        plt.tight_layout();
+        plt.show()
+
+        # Plot: SE over time for worst CDS (highest avg SE)
+        worst_idx = np.argmax(avg_se)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(se[:, worst_idx])
+        ax.set_title(f'Standard Error over time – {cds_names[worst_idx]}')
+        ax.set_xlabel('Day');
+        ax.set_ylabel('Std‑Error (bps)')
+        plt.tight_layout();
+        plt.show()
+
+        return err
+
+    def compute_mc_error(self, paths, alpha=0.05, n_resamples=2000):
+        n, T, d = paths.shape
+        mean_path = paths.mean(axis=0)
+        se_mean = paths.std(axis=0, ddof=1) / np.sqrt(n)
+
+        ci_low = np.zeros((T, d))
+        ci_high = np.zeros((T, d))
+        for t in range(T):
+            for j in range(d):
+                res = bootstrap(
+                    (paths[:, t, j],), np.mean,
+                    confidence_level=1 - alpha,
+                    n_resamples=n_resamples,
+                    method='percentile'
+                )
+                ci_low[t, j], ci_high[t, j] = res.confidence_interval
+        return {'se_mean': se_mean, 'ci_lower': ci_low, 'ci_upper': ci_high}
+
     def _sample_t_copula_shock(self):
         z = np.random.normal(size=self.dim)
         correlated_normal = self.L.dot(z)
@@ -47,8 +100,11 @@ class MultiCDSSimulator:
         return shock
 
     def simulate_paths(self, n_paths=250):
-        n_names = len(self.names)
-        all_paths = np.zeros((n_paths, self.multicds_horizon, n_names))
+        n = len(self.names)
+        T = self.multicds_horizon
+        # base = np.vstack([self.cds_basket[name].best_model['predictions'][:T]
+                          # for name in self.names]).T
+        all_paths = np.empty((n_paths, T, n))
 
         for j, name in enumerate(self.names):
             all_paths[:, :, j] = self.cds_basket[name].best_model["predictions"][:self.multicds_horizon]
@@ -67,10 +123,29 @@ class MultiCDSSimulator:
                     all_paths[i, t, j] += innovation
                     all_paths[i, t, j] = max(0.0, all_paths[i, t, j]) #flooring
 
+        days = np.arange(T)
+        for j, nm in enumerate(self.names):
+            hist = self.cds_basket[nm].history_test['Mid Spread'].values[:T]
+            errs = np.abs(all_paths[:, :, j] - hist).mean(axis=1)
+            best, worst = errs.argmin(), errs.argmax()
+            plt.figure(figsize=(10, 5))
+            plt.plot(days, hist, label='Historical', linewidth=2)
+            plt.plot(days, all_paths[best, :, j], label='Best Fit', linestyle='--')
+            plt.plot(days, all_paths[worst, :, j], label='Worst Fit', linestyle=':')
+            plt.title(f"{nm}: Best/Worst Simulation vs Historical")
+            plt.xlabel('Day');
+            plt.ylabel('Spread (bps)')
+            plt.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0)
+            plt.grid(True);
+            plt.tight_layout();
+            plt.show()
+
+
         idx = pd.MultiIndex.from_product([range(n_paths), range(self.multicds_horizon)], names=["Path", "Day"])
         df = pd.DataFrame(
-            all_paths.reshape(n_paths * (self.multicds_horizon), n_names), index=idx, columns=self.names
+            all_paths.reshape(n_paths * (self.multicds_horizon), n), index=idx, columns=self.names
         )
+        self.report_mc_error(all_paths, self.names)
         return all_paths, df
 
     def simulate_paths_multithreaded(

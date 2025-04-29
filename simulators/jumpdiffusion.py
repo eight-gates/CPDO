@@ -67,15 +67,15 @@ class MOUJumpDiffusion:
 
         # Ljung-Box
         lb = acorr_ljungbox(resid, lags=[10], return_df=True)
-        print(f"[{self.name} - {model}] Ljung-Box (lag=10):")
+        print(f"[{self.name} - {model} model] Ljung-Box (lag=10):")
         print(lb)
 
         # ACF plot
-        fig, ax = plt.subplots(figsize=(6, 4))
-        plot_acf(resid, lags=20, ax=ax)
-        ax.set_title(f"ACF of residuals: {model}")
-        plt.tight_layout()
-        plt.show()
+        # fig, ax = plt.subplots(figsize=(6, 4))
+        # plot_acf(resid, lags=20, ax=ax)
+        # ax.set_title(f"ACF of residuals: {self.name}")
+        # plt.tight_layout()
+        # plt.show()
 
         return {'backtesting_scores': {'MAE': mae, 'MSE': mse, 'RMSE': rmse, 'MAPE': mape},
                 'predictions': forecast[model],
