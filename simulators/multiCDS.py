@@ -1,0 +1,144 @@
+'''
+Open questions:
+1. We apply the copula to have an innovation that is derived from the correlation of other CDS instruments in the basket.
+But I don't believe the story ends there, the dependencies from the broader market should probably also be factored into the simulations:
+a) CDS indicies
+b) Value of the "Floater" that defined the spread for each CDS
+'''
+from concurrent.futures import ThreadPoolExecutor
+from typing import Tuple
+
+from simulators.jumpdiffusion import MOUJumpDiffusion
+import numpy as np
+import pandas as pd
+
+class MultiCDSSimulator:
+    def __init__(self, name_to_series_map, nu=2):
+        self.cds_basket = {name: MOUJumpDiffusion(name, series)
+                       for name, series in name_to_series_map.items()}
+        self.names = list(self.cds_basket.keys())
+        self.dim = len(self.names)
+        self.nu = nu  # degrees of freedom for t-copula
+        self.multicds_horizon = 0
+        self.corr_matrix = self._estimate_correlation()
+        # Cholesky-Decomposition matrix
+        self.L = np.linalg.cholesky(self.corr_matrix)
+
+    def _estimate_correlation(self):
+        resid_data = []
+        number_of_predictions = []
+        for cds in self.cds_basket.values():
+            resid_data.append(cds.best_model["residuals"])
+            number_of_predictions.append(len(cds.best_model["predictions"]))
+
+        min_len_residuals = min(len(r) for r in resid_data)
+        self.multicds_horizon = min(number_of_predictions)
+        resid_data = [r[-min_len_residuals:] for r in resid_data]
+        resid_matrix = np.vstack(resid_data)
+        return np.corrcoef(resid_matrix)
+
+    def _sample_t_copula_shock(self):
+        z = np.random.normal(size=self.dim)
+        correlated_normal = self.L.dot(z)
+        # Chi-Quadrat for t-DoF
+        chi2 = np.random.chisquare(self.nu)
+        # Multivariate t-vector
+        shock = correlated_normal * np.sqrt(self.nu / chi2)
+        return shock
+
+    def simulate_paths(self, n_paths=250):
+        n_names = len(self.names)
+        all_paths = np.zeros((n_paths, self.multicds_horizon, n_names))
+
+        for j, name in enumerate(self.names):
+            all_paths[:, :, j] = self.cds_basket[name].best_model["predictions"][:self.multicds_horizon]
+
+        # Simulation
+        for i in range(n_paths):
+            for t in range(self.multicds_horizon):
+                shocks = self._sample_t_copula_shock()
+                for j, name in enumerate(self.names):
+                    model = self.cds_basket[name]
+                    innovation = model.sigma_residuals * shocks[j]
+                    jump = 0
+                    if model.jump_prob and np.random.rand() < model.jump_prob:
+                        jump = np.random.normal(loc=model.jump_mean, scale=model.jump_std)
+                    innovation += jump
+                    all_paths[i, t, j] += innovation
+                    all_paths[i, t, j] = max(0.0, all_paths[i, t, j]) #flooring
+
+        idx = pd.MultiIndex.from_product([range(n_paths), range(self.multicds_horizon)], names=["Path", "Day"])
+        df = pd.DataFrame(
+            all_paths.reshape(n_paths * (self.multicds_horizon), n_names), index=idx, columns=self.names
+        )
+        return all_paths, df
+
+    def simulate_paths_multithreaded(
+            self,
+            n_paths: int = 250,
+            max_workers: int = None
+    ) -> Tuple[np.ndarray, pd.DataFrame]:
+        """
+        Fast, multithreaded simulation of CDS spread paths with t-copula + jumps.
+
+        Returns
+        -------
+        all_paths : ndarray
+            Shape (n_paths, T, n_names) with simulated spread paths.
+        df : DataFrame
+            MultiIndex (Path, Day) × names, same as before.
+        """
+        n_names = len(self.names)
+        T = self.multicds_horizon
+
+        # 1) Build the “base” T×n_names matrix of predicted paths
+        base_paths = np.stack([
+            self.cds_basket[name].best_model['predictions'][:T]
+            for name in self.names
+        ], axis=1)  # shape: (T, n_names)
+
+        # 2) Pre-allocate result array
+        all_paths = np.empty((n_paths, T, n_names), dtype=float)
+
+        # 3) Define a worker that simulates one path
+        def _simulate_one(seed_and_idx):
+            seed, idx = seed_and_idx
+            rng = np.random.default_rng(seed)
+            path = base_paths.copy()
+
+            for t in range(T):
+                # 3a) sample t-copula shock
+                z = rng.standard_normal(n_names)
+                corr_norm = self.L.dot(z)
+                chi2 = rng.chisquare(self.nu)
+                shocks = corr_norm * np.sqrt(self.nu / chi2)
+
+                # 3b) apply per-name innovations
+                for j, name in enumerate(self.names):
+                    mdl = self.cds_basket[name]
+                    incr = mdl.sigma_residuals * shocks[j]
+                    if mdl.jump_prob > 0 and rng.random() < mdl.jump_prob:
+                        incr += rng.normal(mdl.jump_mean, mdl.jump_std)
+                    # floor at zero
+                    path[t, j] = max(0.0, path[t, j] + incr)
+
+            return idx, path
+
+        # 4) Launch threads
+        #    We give each worker a unique seed for reproducibility
+        seeds_and_indices = [(int(1e6 + i), i) for i in range(n_paths)]
+        with ThreadPoolExecutor(max_workers=max_workers) as exec:
+            for idx, sim in exec.map(_simulate_one, seeds_and_indices):
+                all_paths[idx] = sim
+
+        # 5) Build the same DataFrame you had before
+        idx = pd.MultiIndex.from_product(
+            [range(n_paths), range(T)],
+            names=["Path", "Day"]
+        )
+        df = pd.DataFrame(
+            all_paths.reshape(n_paths * T, n_names),
+            index=idx, columns=self.names
+        )
+        return all_paths, df
+
