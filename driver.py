@@ -96,8 +96,8 @@ def evaluate_copula_dependence_extended(paths_array, original_corr_matrix, dof=5
     # pseudo_obs = compute_pseudo_observations(returns)
 
     # === GOF: KS test for uniformity of marginals ===
-    ks_stats = [kstest(pseudo_obs[:, i], 'uniform') for i in range(n_names)]
-    ks_results = {f"CDS_{i+1}": {'statistic': stat.statistic, 'p_value': stat.pvalue} for i, stat in enumerate(ks_stats)}
+    # ks_stats = [kstest(pseudo_obs[:, i], 'uniform') for i in range(n_names)]
+    # ks_results = {f"CDS_{i+1}": {'statistic': stat.statistic, 'p_value': stat.pvalue} for i, stat in enumerate(ks_stats)}
 
     # === Visuals ===
     if show_plots:
@@ -124,7 +124,7 @@ def evaluate_copula_dependence_extended(paths_array, original_corr_matrix, dof=5
         "simulated_corr_matrix": simulated_corr_matrix,
         "joint_extreme_frequency": joint_extreme_frequency,
         "joint_extreme_count": joint_extreme_count,
-        "ks_test_uniformity": ks_results,
+        # "ks_test_uniformity": ks_results,
     }
 
 # ===================== EXECUTE MULTI-CDS SPREAD SIMULATION ===================== #
