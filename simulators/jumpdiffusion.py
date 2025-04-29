@@ -77,9 +77,12 @@ class MOUJumpDiffusion:
         # plt.tight_layout()
         # plt.show()
 
+        residuals = result.get("residuals")
+        residuals = (residuals - residuals.mean()) / residuals.std()
+
         return {'backtesting_scores': {'MAE': mae, 'MSE': mse, 'RMSE': rmse, 'MAPE': mape},
                 'predictions': forecast[model],
-                'residuals': result.get("residuals"),
+                'residuals': residuals,
                 'coefficients': result.get("coef"),
                 "aic": result.get('aic'),
                 "sigma2": result.get('sigma2'),

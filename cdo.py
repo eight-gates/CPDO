@@ -1,4 +1,6 @@
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 from scipy.stats import bootstrap
 
@@ -260,6 +262,7 @@ class CPDO:
             "rating": rating
         }
 
+
     def report_cpdo_mc_error(self):
         """Compute and display SE and 95% CI for PD, EL, VaR95, & VaR99."""
         # Prepare data
@@ -323,5 +326,3 @@ class CPDO:
             return "B"
         else:
             return "CCC or below"
-
-
