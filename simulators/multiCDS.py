@@ -40,7 +40,6 @@ class MultiCDSSimulator:
         return np.corrcoef(resid_matrix)
 
     def report_mc_error(self,paths: np.ndarray, cds_names: list[str]):
-        """Pretty‑print MC error table & visualize standard errors."""
         err = self.compute_mc_error(paths)
         se = err['se_mean']  # (T,n)
         avg_se = se.mean(axis=0)  # per CDS
@@ -148,47 +147,28 @@ class MultiCDSSimulator:
         self.report_mc_error(all_paths, self.names)
         return all_paths, df
 
-    def simulate_paths_multithreaded(
-            self,
-            n_paths: int = 250,
-            max_workers: int = None
-    ) -> Tuple[np.ndarray, pd.DataFrame]:
-        """
-        Fast, multithreaded simulation of CDS spread paths with t-copula + jumps.
-
-        Returns
-        -------
-        all_paths : ndarray
-            Shape (n_paths, T, n_names) with simulated spread paths.
-        df : DataFrame
-            MultiIndex (Path, Day) × names, same as before.
-        """
+    def simulate_paths_multithreaded(self, n_paths: int = 250, max_workers: int = None):
         n_names = len(self.names)
         T = self.multicds_horizon
 
-        # 1) Build the “base” T×n_names matrix of predicted paths
         base_paths = np.stack([
             self.cds_basket[name].best_model['predictions'][:T]
             for name in self.names
-        ], axis=1)  # shape: (T, n_names)
+        ], axis=1)
 
-        # 2) Pre-allocate result array
         all_paths = np.empty((n_paths, T, n_names), dtype=float)
 
-        # 3) Define a worker that simulates one path
         def _simulate_one(seed_and_idx):
             seed, idx = seed_and_idx
             rng = np.random.default_rng(seed)
             path = base_paths.copy()
 
             for t in range(T):
-                # 3a) sample t-copula shock
                 z = rng.standard_normal(n_names)
                 corr_norm = self.L.dot(z)
                 chi2 = rng.chisquare(self.nu)
                 shocks = corr_norm * np.sqrt(self.nu / chi2)
 
-                # 3b) apply per-name innovations
                 for j, name in enumerate(self.names):
                     mdl = self.cds_basket[name]
                     incr = mdl.sigma_residuals * shocks[j]
@@ -199,14 +179,11 @@ class MultiCDSSimulator:
 
             return idx, path
 
-        # 4) Launch threads
-        #    We give each worker a unique seed for reproducibility
         seeds_and_indices = [(int(1e6 + i), i) for i in range(n_paths)]
         with ThreadPoolExecutor(max_workers=max_workers) as exec:
             for idx, sim in exec.map(_simulate_one, seeds_and_indices):
                 all_paths[idx] = sim
 
-        # 5) Build the same DataFrame you had before
         idx = pd.MultiIndex.from_product(
             [range(n_paths), range(T)],
             names=["Path", "Day"]
