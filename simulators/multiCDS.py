@@ -141,7 +141,8 @@ class MultiCDSSimulator:
                     innovation = model.sigma_residuals * shocks[j]
                     jump = 0
                     if model.jump_prob and np.random.rand() < model.jump_prob:
-                        jump = np.random.normal(loc=model.jump_mean, scale=model.jump_std)
+                        jump = model.sample_jump()
+
                     innovation += jump
                     all_paths[i, t, j] += innovation
                     all_paths[i, t, j] = max(0.0, all_paths[i, t, j]) #flooring
