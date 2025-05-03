@@ -92,11 +92,26 @@ class MOUJumpDiffusion:
         thresh = 3 * self.sigma_residuals
         jump_resid = self.best_model['residuals'][np.abs(self.best_model['residuals']) > thresh]
         n = len(self.best_model['residuals'])
-
+        
         if len(jump_resid) > 0:
+            # the size of postive and negative jump will be drawn from two different exponentail distribution, and that is why
+            # in the paper it called Double Exponentail Distribution
+            jump_up = jump_resid[jump_resid > 0]
+            jump_down = -jump_resid[jump_resid < 0]
             self.jump_prob = len(jump_resid) / n
-            self.jump_mean = float(np.mean(jump_resid))
-            self.jump_std = float(np.std(jump_resid, ddof=1))
+            # we decided the porpotion of positive and negative jump base on past data
+            self.p_up = len(jump_up) / len(jump_resid) if len(jump_resid) > 0 else 0.5
+            self.eta_up = 1.0 / np.mean(jump_up) if len(jump_up) > 0 else 1.0
+            self.eta_down = 1.0 / np.mean(jump_down) if len(jump_down) > 0 else 1.0
+
+    # New function, instead of random drawing number, we put the past data into consideration.
+    def sample_jump(self):
+        if np.random.rand() < self.p_up:
+            return np.random.exponential(scale=1 / self.eta_up)
+        else:
+            return -np.random.exponential(scale=1 / self.eta_down)
+
+
 
     # TODO: Figure out how to eval and pick the best model
     def get_best_model(self):
