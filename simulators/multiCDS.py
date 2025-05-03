@@ -107,21 +107,6 @@ class MultiCDSSimulator:
         shock = correlated_normal * np.sqrt(self.nu / chi2)
         return shock
 
-    def _sample_t_copula_shock_metal(self, n_paths, device=None):
-        # multivariate t shocks: z ~ N(0,I), chi2 ~ Chi2(df)
-        if device:
-            z = torch.randn((n_paths, len(self.names)), device=device)
-            corr = z @ self.L_t.T
-            chi2 = Chi2(df=self.nu).sample((n_paths,)).to(device)
-            factor = torch.sqrt(self.nu / chi2).unsqueeze(1)
-            return corr * factor
-        else:
-            z = np.random.randn(n_paths, len(self.names))
-            corr = z @ self.L.T
-            chi2 = np.random.chisquare(self.nu, size=n_paths)
-            factor = np.sqrt(self.nu / chi2)[:, None]
-            return corr * factor
-
     def simulate_paths(self, n_paths=250):
         n = len(self.names)
         T = self.multicds_horizon
@@ -237,88 +222,4 @@ class MultiCDSSimulator:
 
         self.report_mc_error(all_paths, self.names)
 
-        return all_paths, df
-
-    def simulate_paths_metal(self, n_paths=250, max_workers=None, use_mps=torch.has_mps):
-        """
-        Simulate CDS spread paths with t-copula innovations + jumps.
-        If use_mps and MPS available, runs fully on GPU; otherwise uses CPU.
-        """
-        T = self.multicds_horizon
-        d = len(self.names)
-        # Base forecast matrix (T x d)
-        base = np.stack([self.cds_basket[name].best_model['predictions'][:T]
-                         for name in self.names], axis=1)
-
-        # GPU-accelerated path
-        if use_mps and torch.has_mps:
-            device = torch.device('mps')
-            base_t = torch.tensor(base, device=device, dtype=torch.float32)
-            paths = base_t.unsqueeze(0).repeat(n_paths, 1, 1)  # (n_paths, T, d)
-            # Preload parameters as float32 tensors
-            sigma = torch.tensor([m.sigma_residuals for m in self.cds_basket.values()],
-                                 device=device, dtype=torch.float32).unsqueeze(0)
-            jp = torch.tensor([m.jump_prob for m in self.cds_basket.values()],
-                              device=device, dtype=torch.float32).unsqueeze(0)
-            jm = torch.tensor([m.jump_mean for m in self.cds_basket.values()],
-                              device=device, dtype=torch.float32).unsqueeze(0)
-            js = torch.tensor([m.jump_std for m in self.cds_basket.values()],
-                              device=device, dtype=torch.float32).unsqueeze(0)
-
-            for t in range(T):
-                shocks = self._sample_t_copula_shock_metal(n_paths, device=device)
-                inc = sigma * shocks
-                # jumps
-                if (jp > 0).any():
-                    u = torch.rand((n_paths, d), device=device)
-                    jump_vals = torch.normal(jm, js)
-                    inc = inc + (jump_vals * (u < jp).float())
-                paths[:, t, :] = (paths[:, t, :] + inc).clamp(min=0.0)
-
-            all_paths = paths.cpu().numpy()
-
-        else:
-            # CPU parallel simulation
-            all_paths = np.empty((n_paths, T, d), dtype=float)
-            def worker(seed_idx):
-                seed, idx = seed_idx
-                rng = np.random.default_rng(seed)
-                p = base.copy()
-                for t in range(T):
-                    shocks = self._sample_t_copula_shock_metal(1)[0]
-                    for j, name in enumerate(self.names):
-                        m = self.cds_basket[name]
-                        inc = m.sigma_residuals * shocks[j]
-                        if m.jump_prob and rng.random() < m.jump_prob:
-                            inc += rng.normal(m.jump_mean, m.jump_std)
-                        p[t, j] = max(0.0, p[t, j] + inc)
-                return idx, p
-
-            tasks = [(int(1e6 + i), i) for i in range(n_paths)]
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                for idx, p in executor.map(worker, tasks):
-                    all_paths[idx] = p
-
-        # Plot best/worst vs historical for diagnostics
-        days = np.arange(T)
-        for j, nm in enumerate(self.names):
-            hist = self.cds_basket[nm].history_test['Mid Spread'].values[:T]
-            errs = np.abs(all_paths[:, :, j] - hist).mean(axis=1)
-            best, worst = errs.argmin(), errs.argmax()
-            plt.figure(figsize=(10, 5))
-            plt.plot(days, hist, label='Historical', linewidth=2)
-            plt.plot(days, all_paths[best, :, j], label='Best Fit', linestyle='--')
-            plt.plot(days, all_paths[worst, :, j], label='Worst Fit', linestyle=':')
-            plt.title(f"{nm}: Best/Worst Simulation vs Historical")
-            plt.xlabel('Day'); plt.ylabel('Spread (bps)')
-            plt.legend(loc='upper left', bbox_to_anchor=(1.02, 1)); plt.grid(True)
-            plt.tight_layout(); plt.show()
-
-        # Monte Carlo error report
-        err = self.compute_mc_error(all_paths)
-        print('Monte Carlo error:', {k: v.shape if isinstance(v, np.ndarray) else v for k, v in err.items()})
-
-        # Assemble DataFrame
-        idx = pd.MultiIndex.from_product([range(n_paths), range(T)], names=['Path', 'Day'])
-        df = pd.DataFrame(all_paths.reshape(n_paths*T, d), index=idx, columns=self.names)
         return all_paths, df

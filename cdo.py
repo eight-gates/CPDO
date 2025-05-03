@@ -34,9 +34,9 @@ class CPDO:
         # Store parameters
         self.initial_nav = initial_nav
         self.coupon_rate = coupon_rate
-        self.cushion_rate = cushion_rate
-        self.recovery_rate = recovery_rate
-        self.max_leverage = max_leverage
+        self.cushion_rate = cushion_rate  # is it required to considered at this stage? full sim as a bank
+        self.recovery_rate = recovery_rate # Static recovery rate
+        self.max_leverage = max_leverage # Static max leverage
         self.cash_in_frac = cash_in_frac
         self.cash_out_frac = cash_out_frac
         self.default_model = default_model
@@ -46,6 +46,7 @@ class CPDO:
         # Prepare coupon schedule (times in years when coupons are paid)
         if coupon_freq > 0:
             # E.g., for semiannual, coupon_freq=2 -> payments at 0.5, 1.0, 1.5, ... years up to horizon
+            # what is this 1e-8 number ?
             self.coupon_schedule = np.arange(1.0 / coupon_freq, time_horizon_years + 1e-8, 1.0 / coupon_freq)
         else:
             self.coupon_schedule = np.array([])
@@ -83,10 +84,10 @@ class CPDO:
         - "VaR99": 99% Value-at-Risk of the loss distribution.
         - "rating": Implied credit rating based on the PD/EL (relative to agency standards).
         """
-        spread_paths = np.array(spread_paths)
+        spread_paths = np.array(spread_paths) # TODO: is a copy needed?
         n_scenarios, T, n_names = spread_paths.shape
         # Time step (in years) assuming spreads cover the full horizon uniformly
-        dt = self.time_horizon_years / T
+        dt = self.time_horizon_years / T # TODO: How about T/255? 5/1207 => time step divided in equal parts
 
         # Initialize result arrays
         nav_paths = np.zeros((n_scenarios, T + 1))
@@ -104,6 +105,7 @@ class CPDO:
             # Simulate day-by-day
             for t in range(T):
                 # If already cashed-in or cashed-out, keep NAV constant for remaining period
+                # TODO: Would probably want to grow NAV at risk free to counter balance losses?
                 if cash_in or cash_out:
                     nav_paths[i, t + 1] = nav
                     default_loss_paths[i, t + 1] = default_loss_paths[i, t]
@@ -138,12 +140,14 @@ class CPDO:
                     for j in range(n_names):
                         if alive[j]:
                             lam = current_spreads[j] / max(1e-6, (1 - self.recovery_rate))
+                            # TODO: Needs the different recovery rates
                             p_default = 1 - np.exp(-lam * dt)  # default probability in this interval
-                            if np.random.rand() < p_default:
+                            if np.random.rand() < p_default: # TODO: WHATS THISSS ???
                                 defaults_this_step[j] = True
                 elif self.default_model == 'barrier':
                     # Barrier-based default: if spread exceeds a high threshold, default is triggered
                     # (Example threshold: 1000 bps)
+                    # TODO: thresholding technique from today's lecture than using fixed threshold, EVT, excess GPD
                     threshold = 0.10  # 10% spread as default barrier
                     for j in range(n_names):
                         if alive[j] and current_spreads[j] >= threshold:
@@ -173,6 +177,7 @@ class CPDO:
 
                 # --- Premium accrual for this step ---
                 # Earn spread premium on each surviving exposure over the interval
+                # TODO: WHAT IS PREMIUM INCOME?
                 premium_income = np.sum(exposure_per_name * alive_spreads * dt)
                 nav += premium_income  # add premium to NAV
 
@@ -186,6 +191,7 @@ class CPDO:
                         if alive[j]:
                             ds = next_spreads[j] - current_spreads[j]
                             # If spreads widen (ds > 0), CPDO loses value (negative change to NAV); if tighten, NAV gains.
+                            #TODO: NEEDS TO CHANGE, ZERO COUPON EARNINGS MISSING
                             mtm_change += -ds * duration * exposure_per_name
                     nav += mtm_change  # apply mark-to-market change to NAV
 
@@ -195,10 +201,15 @@ class CPDO:
                 remaining_coupons = np.sum(self.coupon_schedule > current_time)
                 remaining_coupon_payments = remaining_coupons * (
                             self.coupon_rate * self.initial_nav / (self.coupon_freq if self.coupon_freq else 1))
+
+                # TODO : WRONG TBP calculation
                 total_obligations = self.initial_nav + remaining_coupon_payments  # principal + remaining coupons
+
+                # TODO: Should be made on shortfall
                 if nav >= total_obligations:
                     # Sufficient assets to cover all future payments -> cash-in
                     cash_in = True
+                    # TODO: WHY?
                     nav = total_obligations  # lock NAV to exactly meet obligations (excess considered set aside)
                     nav_paths[i, t + 1:] = nav
                     default_loss_paths[i, t + 1:] = default_loss_paths[i, t + 1]
