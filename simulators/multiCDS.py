@@ -38,13 +38,15 @@ class MultiCDSSimulator:
     def _estimate_correlation(self):
         resid_data = []
         number_of_predictions = []
+        # run the loop and put residual into list
         for cds in self.cds_basket.values():
             resid_data.append(cds.best_model["residuals"])
             number_of_predictions.append(len(cds.best_model["predictions"]))
-
+        # keep the shortest length    
         min_len_residuals = min(len(r) for r in resid_data)
         self.multicds_horizon = min(number_of_predictions)
         resid_data = [r[-min_len_residuals:] for r in resid_data]
+        # made a matrix
         resid_matrix = np.vstack(resid_data)
         return np.corrcoef(resid_matrix)
 

@@ -9,7 +9,7 @@ from statsmodels.tsa.stattools import adfuller
 from statsforecast import StatsForecast
 from statsforecast.models import AutoRegressive, ARIMA, ARCH, GARCH
 from scipy.stats import zscore
-
+import statsmodels.api as sm
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 class MOUJumpDiffusion:
@@ -157,3 +157,92 @@ class MOUJumpDiffusion:
             model_name = list(fc.columns)[-1]
             # store
             self.model_candidates[model_name] = self.get_model_eval(X_test, fc, result, model_name)
+            
+            
+
+
+    def test_sign_bias(self, verbose=True):
+        """
+        Perform the Engle-Ng Sign Bias Test on the standardized residuals.
+        """
+        if self.best_model.get("residuals") is None:
+            raise ValueError("No residuals found in best_model.")
+    
+        residuals = self.best_model["residuals"]
+    
+        # variables
+        e = np.array(residuals)
+        e_lag = e[:-1]
+        e_now = e[1:]
+        z2_now = e_now ** 2
+    
+        D_neg = (e_lag < 0).astype(int)
+        D_pos = (e_lag >= 0).astype(int)
+    
+        X = np.column_stack([
+            D_neg,            # c1: sign bias
+            D_neg * e_lag,    # c2: negative size bias
+            D_pos * e_lag     # c3: positive size bias
+        ])
+        X = sm.add_constant(X)
+        
+        model = sm.OLS(z2_now, X).fit()
+    
+        if verbose:
+            print(f"\n[Sign Bias Test – {self.name}]")
+            print(model.summary())
+    
+            # Joint F-test
+            print("\n[Joint F-test for c1 = c2 = c3 = 0]")
+            joint_test = model.f_test("x1 = x2 = x3 = 0")
+            print(joint_test)
+    
+        return model
+        """
+        === Interpretation Guide for Sign Bias Test ===
+        
+        This test evaluates whether your model residuals still exhibit volatility asymmetry.
+        Ideally the simulation of innovation(copula for diffusion  and exponentail distribution for jump) will make the data relaistic,
+        which is asymmetric, so the residual will be symmetric.
+        
+        We run the following regression:
+            εₜ² = c₀ + c₁·I(εₜ₋₁ < 0) + c₂·I(εₜ₋₁ < 0)·εₜ₋₁ + c₃·I(εₜ₋₁ ≥ 0)·εₜ₋₁ + uₜ
+        
+        Variables:
+        - εₜ² : Squared residual (proxy for volatility)
+        - I(·) : Indicator function
+        - εₜ₋₁ : Lagged residual
+        
+        In the OLS output:
+        - `coef`: The size of the effect
+        - `P>|t|`: p-value of each coefficient
+            → Small p-value (< 0.05) means the effect is statistically significant
+        
+        Key interpretations:
+        --------------------------------------------
+        1. **c₁ (Sign Bias)**  
+           → Significant: Negative shocks increase volatility (your jump model may be missing this asymmetry)
+        
+        2. **c₂ (Negative Size Bias)**  
+           → Significant: Larger negative shocks increase volatility even more (η⁻ may be too low or λ underestimated)
+        
+        3. **c₃ (Positive Size Bias)**  
+           → Significant: Positive shocks also increase volatility (check if p_up or η⁺ is too aggressive)
+        
+        4. **Joint F-test: c₁ = c₂ = c₃ = 0**  
+           → Significant: Your model fails to fully absorb volatility asymmetry
+        
+        How to respond:
+        --------------------------------------------
+        All p-values > 0.1 → Model likely captures asymmetry well (ideal case)
+        
+        Only c₂ significant → Consider adjusting jump threshold or η⁻
+        
+        All significant → Consider recalibrating η⁺, η⁻, p_up, or jump detection rule
+        
+        If bias persists → Consider using volatility-adjusted residuals (e.g., from a GARCH model)
+        
+        """
+        
+
+
