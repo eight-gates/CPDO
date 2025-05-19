@@ -71,11 +71,9 @@ $$
 
 4. **CPDO Capital Update**
 
-   $$
-     C_{t+1} = C_t + G\,(s_t - \bar s)\,Δt
-               + rC_t\,Δt - c\,Δt
-               - (1-R)\mathbf{1}\{\text{default}_t\}.
-   $$
+$$
+C_{t+1} = C_t + G\,(s_t - \bar s)\,Δt + rC_t\,Δt - c\,Δt - (1-R)\mathbf{1}\{\text{default}_t\}.
+$$
 
 ---
 
