@@ -3,7 +3,7 @@
 A Python-based framework for:
 - Simulating correlated Credit Default Swap (CDS) spread paths via copulas  
 - Fitting univariate time‐series (ARIMA‐GARCH) to each CDS  
-- Generating multi‐name scenarios with a skewed‐\(t\), Student‐\(t\), or GH copula  
+- Generating multi‐name scenarios with a skewed‐\(t\), Student‐\(t\) and compared with Gaussian copula  
 - Evaluating dependence properties and stress‐testing joint extreme events  
 - Modeling a Constant Proportion Debt Obligation (CPDO) following Dorn (2010)
 
@@ -57,17 +57,18 @@ where
 * $\eta_t$ are the innovations.
 
 2. **Student-$t$ Copula Shock**
-   $$
-     z\sim t_ν,\quad L\,z,\quad
-     \varepsilon = Lz \sqrt{\frac{ν}{χ^2_ν}}.
-   $$
+
+$$
+z\sim t_ν,\quad L\,z,\quad
+\varepsilon = Lz \sqrt{\frac{ν}{χ^2_ν}}
+$$
+
 3. **GJR-GARCH w/ Market Lags**
 
-   $$
-     \sigma_t^2 = \omega + β\sigma^2_{t-1}
-       + αε^2_{t-1} + γ\,ε^2_{t-1}\mathbf{1}\{ε_{t-1}>0\}
-       + α_mε^2_{m,t-1} + γ_mε^2_{m,t-1}\mathbf{1}\{ε_{m,t-1}>0\}.
-   $$
+$$
+\sigma_t^2 = \omega + β\sigma^2_{t-1} + αε^2_{t-1} + γ\,ε^2_{t-1}\mathbf{1}\{ε_{t-1}>0\} + α_mε^2_{m,t-1} + γ_mε^2_{m,t-1}\mathbf{1}\{ε_{m,t-1}>0\}.
+$$
+
 4. **CPDO Capital Update**
 
    $$
