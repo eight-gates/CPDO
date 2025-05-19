@@ -5,3 +5,5 @@ venv/
 *.env
 *.log
 stash
+.DS_Store
+*/**/.DS_Store
